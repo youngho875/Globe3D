@@ -17,6 +17,7 @@ struct MapGroupConfig
     std::filesystem::path labelPath;
     std::filesystem::path cityPath;
 
+    int sourceEpsg = 4326;
     bool visible = false;
 };
 
@@ -118,6 +119,8 @@ namespace basemap
         if (!group)
             return result;
 
+        const auto epsg = ReadText(group, "SourceEPSG");
+        if (!epsg.empty()) result.sourceEpsg = std::stoi(epsg);
         result.visible = ReadBool(group, "visual");
         result.path = ReadPath(group, "Path", baseDirectory);
         result.boundaryPath = ReadPath(group, "BoundaryPath", baseDirectory);

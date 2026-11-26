@@ -26,6 +26,8 @@
 
 class CGlobe3DApp : public CWinAppEx
 {
+private:
+    ULONG_PTR graphicsToken_=0;
 public:
 	CGlobe3DApp() noexcept;
 

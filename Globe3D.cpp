@@ -21,6 +21,8 @@
 
 #include "Globe3DDoc.h"
 #include "Globe3DView.h"
+#include <gdiplus.h>
+#pragma comment(lib,"gdiplus.lib")
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -73,6 +75,8 @@ CGlobe3DApp theApp;
 
 BOOL CGlobe3DApp::InitInstance()
 {
+    Gdiplus::GdiplusStartupInput graphicsInput;
+    if(Gdiplus::GdiplusStartup(&graphicsToken_,&graphicsInput,nullptr)!=Gdiplus::Ok)return FALSE;
 	// 애플리케이션 매니페스트가 ComCtl32.dll 버전 6 이상을 사용하여 비주얼 스타일을
 	// 사용하도록 지정하는 경우, Windows XP 상에서 반드시 InitCommonControlsEx()가 필요합니다. 
 	// InitCommonControlsEx()를 사용하지 않으면 창을 만들 수 없습니다.
@@ -153,6 +157,7 @@ BOOL CGlobe3DApp::InitInstance()
 
 int CGlobe3DApp::ExitInstance()
 {
+    if(graphicsToken_){Gdiplus::GdiplusShutdown(graphicsToken_);graphicsToken_=0;}
 	//TODO: 추가한 추가 리소스를 처리합니다.
 	AfxOleTerm(FALSE);
 

@@ -17,6 +17,7 @@
 #include "MainFrm.h"
 #include "Globe3D.h"
 
+
 #ifdef _DEBUG
 #undef THIS_FILE
 static char THIS_FILE[]=__FILE__;

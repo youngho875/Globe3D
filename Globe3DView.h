@@ -16,6 +16,9 @@
 #include <afxwin.h>
 #include <gl/GL.h>
 #include "Geometry.h"
+#include "../MapViewSync/MapViewSync.h"
+#include "../MapViewSync/MapSceneSync.h"
+#include "GlobeScene.h"
 #include "BaseMapConfig.h"
 #include "ShapeLayer.h"
 #include <filesystem>
@@ -38,6 +41,15 @@ public:
 private:
     //ShapeLayer baseMapLayers_;
     //void OpenShapeFile();
+    CMapViewSync viewSync_{1};
+    CMapSceneSync sceneSync_;
+    CGlobeScene scene_;
+    std::vector<unsigned> baseMapLayerGroups_;
+    bool baseMapGroupLoaded_[2] = {false,false};
+    MapViewSyncState CaptureSyncState() const;
+    void SetSyncBaseVisible(unsigned index,bool visible);
+    void ShowSyncBaseMapMenu(CPoint point);
+    afx_msg void OnTimer(UINT_PTR id);
     BaseMapConfig baseMapConfig_;
     std::vector<std::unique_ptr<ShapeLayer>> baseMapLayers_;
 

@@ -13,9 +13,28 @@
 #include <memory>
 #include <stdexcept>
 #include <utility>
+#include <filesystem>
 
 void ShapeLayer::Load(const std::string& filename, int fallbackEPSG)
 {
+    static const bool configured = [] {
+        wchar_t executable[32768] = {};
+        GetModuleFileNameW(nullptr, executable, 32768);
+        const auto base = std::filesystem::path(executable).parent_path();
+        for (const auto& candidate : {base / L"proj9/share",
+             base / L"../../gdal_sdk/bin/proj9/share", base / L"share/proj"})
+        {
+            if (std::filesystem::is_regular_file(candidate / L"proj.db"))
+            {
+                const auto path = candidate.lexically_normal().u8string();
+                const char* paths[] = {path.c_str(), nullptr};
+                OSRSetPROJSearchPaths(paths);
+                return true;
+            }
+        }
+        return false;
+    }();
+    (void)configured;
     GDALAllRegister();
 
     using DatasetPtr = std::unique_ptr<GDALDataset, decltype(&GDALClose)>;

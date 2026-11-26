@@ -45,6 +45,7 @@ BEGIN_MESSAGE_MAP(CGlobe3DView, CView)
 	ON_WM_CONTEXTMENU()
 	ON_WM_RBUTTONUP()
 	ON_WM_CREATE()
+    ON_WM_TIMER()
 	ON_WM_DESTROY()
 	ON_WM_SIZE()
 	ON_WM_ERASEBKGND()
@@ -136,11 +137,9 @@ void CGlobe3DView::OnRButtonUp(UINT /* nFlags */, CPoint point)
 	OnContextMenu(this, point);
 }
 
-void CGlobe3DView::OnContextMenu(CWnd* /* pWnd */, CPoint point)
+void CGlobe3DView::OnContextMenu(CWnd*, CPoint point)
 {
-#ifndef SHARED_HANDLERS
-	theApp.GetContextMenuManager()->ShowPopupMenu(IDR_POPUP_EDIT, point.x, point.y, this, TRUE);
-#endif
+    ShowSyncBaseMapMenu(point);
 }
 
 
@@ -180,8 +179,10 @@ int CGlobe3DView::OnCreate(LPCREATESTRUCT cs)
         globeList_ = CompileMesh(geo::globe());
         RebuildTerrain();
         InitHudFont();
-        LoadBaseMapXml(LR"(d:/work/상황도/Release/Bin/base-map.xml)");
-        AutoLoadTexture();
+        wchar_t executable[32768]={};
+        GetModuleFileNameW(nullptr,executable,32768);
+        LoadBaseMapXml(std::filesystem::path(executable).parent_path()/L"base-map.xml");
+        // Base-map imagery is loaded exclusively from base-map.xml.
         UpdateTitle();
     }
     catch (const std::exception&)
@@ -189,6 +190,7 @@ int CGlobe3DView::OnCreate(LPCREATESTRUCT cs)
         AfxMessageBox(L"OpenGL 초기화 또는 메시 생성 실패. 그래픽 드라이버와 픽셀 포맷을 확인하세요.");
         ReleaseGL(); return -1;
     }
+    SetTimer(0x4731,150,nullptr);
     return 0;
 }
 
@@ -243,6 +245,7 @@ void CGlobe3DView::ReleaseGL()
     {
         if (dc_ && wglMakeCurrent(dc_, rc_))
         {
+            scene_.ReleaseGL();
             if (texture_)
                 glDeleteTextures(1, &texture_);
             if (fontList_)
@@ -267,6 +270,7 @@ void CGlobe3DView::ReleaseGL()
 
 void CGlobe3DView::OnDestroy()
 {
+    KillTimer(0x4731);
     ReleaseGL();
 
     CView::OnDestroy();
@@ -359,8 +363,9 @@ void CGlobe3DView::Render()
     // Tighten depth range in globe mode; local mode requires a smaller near plane.
     //double nearPlane=local_ ? std::max(0.5,distance_*0.001) : std::max(1.0,(distance_-geo::RadiusKm)*0.25);
     //gluPerspective(45,double(width_)/height_,nearPlane,distance_+geo::RadiusKm*3);
-    const double rangeKm = local_ ? distance_ : std::max(1.0, distance_ - geo::RadiusKm);
-    const double nearPlane = std::max(0.5, rangeKm * 0.0001);
+    const double rangeKm = local_ ? distance_ : std::max(0.001, distance_ - geo::RadiusKm);
+    // Keep sufficient depth precision for coincident map surfaces on a globe.
+    const double nearPlane = std::max(0.0001, rangeKm * 0.1);
     const double farPlane = rangeKm + geo::RadiusKm * 3.0;
 
     glMatrixMode(GL_PROJECTION);
@@ -374,9 +379,9 @@ void CGlobe3DView::Render()
     geo::Vec3 eye, target, up;
 
     // 카메라가 바라볼 지표면 위치
-    const double centerLon = local_ ? 128.0 : lon_;
-    const double centerLat = local_ ? 36.0 : lat_;
-    const double targetHeightM = local_ ? 1000.0 * exaggeration_ : 0.0;
+    const double centerLon = lon_;
+    const double centerLat = lat_;
+    const double targetHeightM = local_ && !scene_.Active() ? 1000.0 * exaggeration_ : 0.0;
 
     target = geo::position(centerLon, centerLat, targetHeightM);
 
@@ -402,7 +407,7 @@ void CGlobe3DView::Render()
 
     // 기존 전지구 모드 distance_는 지구 중심까지의 거리이므로
     // 지표면 중심의 회전 거리로 변환
-    const double cameraRangeKm = local_ ? distance_ : std::max(1.0, distance_ - geo::RadiusKm);
+    const double cameraRangeKm = local_ ? distance_ : std::max(0.001, distance_ - geo::RadiusKm);
 
     // target 주위로 카메라를 기울여 배치
     eye = target + (radial * std::cos(pitch) - horizontal * std::sin(pitch)) * cameraRangeKm;
@@ -442,7 +447,7 @@ void CGlobe3DView::Render()
     }
     glCallList(globeList_);
     glPolygonMode(GL_FRONT_AND_BACK, wire_ ? GL_LINE : GL_FILL);
-    if (terrainVisible_)
+    if (terrainVisible_ && !scene_.Active())
         glCallList(terrainList_);
 
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
@@ -450,9 +455,15 @@ void CGlobe3DView::Render()
     if (grid_)
         DrawGrid();
 
-    for (const auto& layer : baseMapLayers_)
-        layer->Draw();
+    for(size_t i=0;i<baseMapLayers_.size();++i)
+    {
+        const unsigned group=baseMapLayerGroups_[i];
+        if(group==0?baseMapConfig_.smallScale.visible:baseMapConfig_.world.visible)
+            baseMapLayers_[i]->Draw();
+    }
 
+    scene_.DrawMaps();
+    scene_.DrawObjects(width_,height_);
     UpdateMouseCoordinates();
     DrawHud();
     SwapBuffers(dc_);
@@ -566,7 +577,9 @@ void CGlobe3DView::OnMouseMove(UINT flags, CPoint point)
 BOOL CGlobe3DView::OnMouseWheel(UINT, short delta, CPoint point)
 {
     double factor = std::pow(0.85, double(delta) / WHEEL_DELTA);
-    distance_ = std::clamp(distance_ * factor, local_ ? 400.0 : geo::RadiusKm + 250.0, local_ ? 5000.0 : 60000.0);
+    const double range=local_?distance_:distance_-geo::RadiusKm;
+    const double next=std::clamp(range*factor,0.001,200000.0);
+    distance_=local_?next:geo::RadiusKm+next;
     Invalidate(FALSE);
 
     return TRUE;
@@ -688,7 +701,7 @@ void CGlobe3DView::UpdateMouseCoordinates()
         return;
 
     static const geo::Mesh empty;
-    auto pick = geo::pickSurface(nearPoint, geo::unit(farPoint - nearPoint), terrainVisible_ ? terrainMesh_ : empty);
+    auto pick = geo::pickSurface(nearPoint, geo::unit(farPoint - nearPoint), (terrainVisible_ && !scene_.Active()) ? terrainMesh_ : empty);
     if (!pick.hit)
         return;
 
@@ -728,6 +741,7 @@ void CGlobe3DView::DrawHud()
         glCallLists(static_cast<GLsizei>(text.size()), GL_UNSIGNED_BYTE, text.data());
     };
     print(22, coordinateText_);
+    print(70, viewSync_.IsEnabled()?"C4IMap sync: ON":"C4IMap sync: OFF");
     print(46, "T: imagery folder  I: imagery  H: terrain  1/2: view  W: wire  G: grid  E: height");
     glPopMatrix();
     glMatrixMode(GL_PROJECTION);
@@ -865,8 +879,10 @@ void CGlobe3DView::LoadBaseMapXml(const std::filesystem::path& filename)
         const BaseMapConfig config = basemap::Load(filename);
 
         std::vector<std::unique_ptr<ShapeLayer>> loaded;
+        std::vector<unsigned> groups;
+        unsigned groupIndex=0;
 
-        auto loadShape = [&loaded](const std::filesystem::path& path)
+        auto loadShape = [&loaded,&groups,&groupIndex](const std::filesystem::path& path, int sourceEpsg)
         {
             if (path.empty())
                 return;
@@ -879,8 +895,9 @@ void CGlobe3DView::LoadBaseMapXml(const std::filesystem::path& filename)
             auto layer = std::make_unique<ShapeLayer>();
 
             // C++17: u8string()은 std::string 반환
-            layer->Load(path.u8string());
+            layer->Load(path.u8string(), sourceEpsg);
             loaded.push_back(std::move(layer));
+            groups.push_back(groupIndex);
         };
 
         auto loadGroup = [&loadShape](const MapGroupConfig& group)
@@ -893,17 +910,21 @@ void CGlobe3DView::LoadBaseMapXml(const std::filesystem::path& filename)
                 throw std::runtime_error("Visible map group has no Path");
             }
 
-            loadShape(group.path);
-            loadShape(group.boundaryPath);
-            loadShape(group.cityPath);
+            loadShape(group.path, group.sourceEpsg);
+            loadShape(group.boundaryPath, group.sourceEpsg);
+            loadShape(group.cityPath, group.sourceEpsg);
         };
 
         // visual=true인 그룹만 로딩
         loadGroup(config.smallScale);
+        groupIndex=1;
         loadGroup(config.world);
 
         // Shape 로드 성공 후 기존 레이어 교체
         baseMapLayers_.swap(loaded);
+        baseMapLayerGroups_.swap(groups);
+        baseMapGroupLoaded_[0]=config.smallScale.visible;
+        baseMapGroupLoaded_[1]=config.world.visible;
         baseMapConfig_ = config;
 
         // 영상 표시 여부 적용

@@ -1,4 +1,4 @@
-#include <wincodec.h>
+﻿#include <wincodec.h>
 #include <wrl/client.h>
 #include "TextureLoader.h"
 #include <algorithm>
@@ -143,4 +143,5 @@ EarthImage LoadNaturalEarthII(const std::filesystem::path& root, int maxTextureS
         }
         return image;
     }
+    throw std::runtime_error("No complete NaturalEarthII level 0, 1 or 2 found");
 }

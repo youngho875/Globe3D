@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -174,7 +174,7 @@
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <OutputFile>D:/work/상황도/Release/Bin/Globe3D.exe</OutputFile>
+      <OutputFile>$(OutDir)$(TargetName)$(TargetExt)</OutputFile>
       <AdditionalLibraryDirectories>D:\work\상황도\gdal_sdk\lib;</AdditionalLibraryDirectories>
       <AdditionalDependencies>gdal_i.lib;opengl32.lib;glu32.lib;windowscodecs.lib;ole32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
@@ -223,7 +223,7 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="PropertiesWnd.cpp" />
-    <ClCompile Include="TextureLoader.cpp" />
+    <ClCompile Include="TextureLoader.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="ViewTree.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -265,7 +265,30 @@
     <None Include="res\Globe3D.rc2" />
     <None Include="res\ribbon.mfcribbon-ms" />
   </ItemGroup>
-  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  
+  <PropertyGroup><SceneSdk>$(ProjectDir)..\ICOPS</SceneSdk><SceneSuffix>_2019</SceneSuffix>
+    <SceneSuffix Condition="'$(Platform)'=='x64'">$(SceneSuffix)X64</SceneSuffix>
+    <SceneSuffix Condition="'$(CharacterSet)'=='Unicode'">$(SceneSuffix)U</SceneSuffix>
+    <SceneSuffix Condition="'$(Configuration)'=='Debug'">$(SceneSuffix)D</SceneSuffix>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile><LanguageStandard>stdcpp17</LanguageStandard><AdditionalIncludeDirectories>$(ProjectDir)..\gdal_sdk\include;$(SceneSdk)\SDK\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
+    <Link><AdditionalLibraryDirectories>$(ProjectDir)..\gdal_sdk\lib;$(SceneSdk)\SDK\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories><AdditionalDependencies>ICOPS_Framework$(SceneSuffix).lib;ICOPS_LogManager$(SceneSuffix).lib;ICOPS_WarSym$(SceneSuffix).lib;gdiplus.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="GlobeScene.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile><ClInclude Include="GlobeScene.h"/>
+    <ClCompile Include="SceneSymbols.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile><ClInclude Include="SceneSymbols.h"/>
+    <ClCompile Include="VectorTileStyle.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile><ClInclude Include="VectorTileStyle.h"/>
+    <ClCompile Include="AppPaths.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile><ClInclude Include="AppPaths.h"/>
+    <ClCompile Include="..\MapViewSync\MapSceneSync.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile><ClInclude Include="..\MapViewSync\MapSceneSync.h"/>
+  </ItemGroup>
+  <Target Name="CopySceneRuntime" AfterTargets="Build"><ItemGroup><SceneRuntime Include="$(SceneSdk)\bin\*$(SceneSuffix).dll"/></ItemGroup><Copy SourceFiles="@(SceneRuntime)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true"/></Target>
+<Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
-</Project>
+  <ItemGroup>
+    <ClCompile Include="..\MapViewSync\MapViewSync.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClCompile Include="Globe3DView_Sync.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClInclude Include="..\MapViewSync\MapViewSync.h" />
+  </ItemGroup>
+<ItemGroup><ClCompile Include="ShapeLayer.cpp" /></ItemGroup><ItemGroup><ClCompile Include="..\c4imap\OverlayRibbonRender.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><ForcedIncludeFiles>$(ProjectDir)pch.h;%(ForcedIncludeFiles)</ForcedIncludeFiles></ClCompile></ItemGroup></Project>
