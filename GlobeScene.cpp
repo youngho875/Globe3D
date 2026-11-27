@@ -1,8 +1,9 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "GlobeScene.h"
 #include "Geometry.h"
 #include "VectorTileStyle.h"
 #include "SceneSymbols.h"
+#include "SceneGround.h"
 #include "../c4imap/OverlayRibbonRender.h"
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE 0x812F
@@ -230,6 +231,8 @@ public:
     std::string lastView;
     GLuint overlayTexture=0;
     CSceneSymbols symbols;
+    CSceneGround ground;
+    std::map<std::string, GpuTile> groundObjects;
 
     Impl():worker([this]{Work();}){}
     ~Impl()
@@ -268,6 +271,7 @@ bool CGlobeScene::SetSnapshot(const std::string& json)
         ++impl_->generation;impl_->jobs.clear();impl_->completed.clear();impl_->pending.clear();impl_->failed.clear();
         impl_->sourceSignature=signature;impl_->wanted.clear();impl_->lastView.clear();
     }
+    impl_->ground.Configure(next.GetString("heightSource"), next.GetInteger("heightKind"), next.GetString("heightDll"));
     impl_->scene=next;impl_->active=true;return true;
 }
 void CGlobeScene::RequestView(double lon,double lat,double mpp,int width,int height)
@@ -381,6 +385,8 @@ void CGlobeScene::DrawMaps()
 void CGlobeScene::ReleaseGL()
 {
     for(auto& tile:impl_->gpu)glDeleteTextures(1,&tile.second.texture);
+    for (auto& object : impl_->groundObjects) glDeleteTextures(1, &object.second.texture);
+    impl_->groundObjects.clear();
     impl_->gpu.clear();if(impl_->overlayTexture)glDeleteTextures(1,&impl_->overlayTexture);
     impl_->overlayTexture=0;
 }
@@ -390,13 +396,18 @@ void CGlobeScene::DrawObjects(int width,int height)
     auto& p=*impl_;
     if(!p.active||width<1||height<1)return;
     auto objects=p.scene.GetArray("overlays"),military=p.scene.GetArray("military");
-    if(objects.Size()==0&&military.Size()==0)return;
+    if(objects.Size()==0&&military.Size()==0)
+    {
+        for(auto& object:p.groundObjects) glDeleteTextures(1,&object.second.texture);
+        p.groundObjects.clear(); p.symbols.BeginFrame(); p.symbols.EndFrame();
+        return;
+    }
     GLdouble model[16],projection[16];GLint viewport[4];
     glGetDoublev(GL_MODELVIEW_MATRIX,model);glGetDoublev(GL_PROJECTION_MATRIX,projection);glGetIntegerv(GL_VIEWPORT,viewport);
     auto project=[&](const CPLJSONObject& coordinate,Gdiplus::PointF& result)
     {
         auto a=coordinate.ToArray();if(a.Size()!=2)return false;
-        auto v=geo::position(a[0].ToDouble(),a[1].ToDouble(),30);
+        auto v=geo::position(a[0].ToDouble(),a[1].ToDouble(),p.ground.Height(a[0].ToDouble(),a[1].ToDouble())+30);
         // Reject points on the far side of the sphere using the eye-space normal.
         const double ex=model[0]*v.x+model[4]*v.y+model[8]*v.z+model[12];
         const double ey=model[1]*v.x+model[5]*v.y+model[9]*v.z+model[13];
@@ -411,6 +422,7 @@ void CGlobeScene::DrawObjects(int width,int height)
         for(auto layer:p.scene.GetArray("overlayLayers"))if(layer.GetInteger("id")==id)return layer.GetBool("visible");
         return false;
     };
+    std::set<std::string> usedObjects;
     Gdiplus::Bitmap bitmap(width,height,PixelFormat32bppARGB);
     {
         Gdiplus::Graphics graphics(&bitmap);graphics.Clear(Gdiplus::Color(0,0,0,0));
@@ -419,8 +431,39 @@ void CGlobeScene::DrawObjects(int width,int height)
         for(auto object:objects)
         {
             if(!visible(object.GetInteger("layer")))continue;
+            const std::string key = object.Format(CPLJSONObject::PrettyFormat::Plain);
+            usedObjects.insert(key);
+            auto found = p.groundObjects.find(key);
+            if (found != p.groundObjects.end()) continue;
+            auto start = object["start"].ToArray(), end = object["end"].ToArray();
+            if (start.Size()!=2 || end.Size()!=2) continue;
+            const double origin = start[0].ToDouble();
+            auto longitude = [origin](double lon) { return origin + std::remainder(lon-origin,360.0); };
+            Bounds bounds{origin, start[1].ToDouble(), origin, start[1].ToDouble()};
+            auto extend = [&](const CPLJSONObject& coordinate) {
+                auto a = coordinate.ToArray(); if(a.Size()!=2) return;
+                const double lon = longitude(a[0].ToDouble()), lat = a[1].ToDouble();
+                bounds.west = std::min(bounds.west,lon); bounds.east = std::max(bounds.east,lon);
+                bounds.south = std::min(bounds.south,lat); bounds.north = std::max(bounds.north,lat);
+            };
+            extend(object["end"]);
+            for(auto coordinate : object.GetArray("points")) extend(coordinate);
+            const double dx=std::max(.0001,bounds.east-bounds.west),dy=std::max(.0001,bounds.north-bounds.south);
+            bounds.west-=dx*.2; bounds.east+=dx*.2;
+            bounds.south=std::max(-89.999,bounds.south-dy*.2); bounds.north=std::min(89.999,bounds.north+dy*.2);
+            auto mapPoint = [&](const CPLJSONObject& coordinate, Gdiplus::PointF& result) {
+                auto a=coordinate.ToArray(); if(a.Size()!=2) return false;
+                result=Gdiplus::PointF(float((longitude(a[0].ToDouble())-bounds.west)*1024/(bounds.east-bounds.west)),
+                    float((bounds.north-a[1].ToDouble())*1024/(bounds.north-bounds.south)));
+                return true;
+            };
+            Gdiplus::Bitmap surface(1024,1024,PixelFormat32bppARGB);
+            auto surfaceGraphics=std::make_unique<Gdiplus::Graphics>(&surface);
+            auto& graphics=*surfaceGraphics;
+            graphics.Clear(Gdiplus::Color(0,0,0,0));
+            graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
             Gdiplus::PointF a,b;
-            if(!project(object["start"],a)||!project(object["end"],b))continue;
+            mapPoint(object["start"],a); mapPoint(object["end"],b);
             const int type=object.GetInteger("type");
             auto encoded=object["style"];
             CLocalOverlay::Style style;
@@ -464,11 +507,21 @@ void CGlobeScene::DrawObjects(int width,int height)
             for(auto coordinate:object.GetArray("points"))
             {
                 Gdiplus::PointF point;
-                if(!project(coordinate,point)){good=false;break;}
+                if(!mapPoint(coordinate,point)){good=false;break;}
                 points.push_back(point);
             }
             if(good)
                 OverlayRibbonRender::Draw(graphics,type,a.X,a.Y,b.X,b.Y,style,points);
+            graphics.Flush(Gdiplus::FlushIntentionSync);
+            surfaceGraphics.reset();
+            std::vector<unsigned char> pixels;
+            BitmapPixels(surface,pixels);
+            if (!pixels.empty())
+            {
+                GpuTile tile; tile.bounds=bounds;
+                Upload(tile.texture,1024,1024,pixels);
+                p.groundObjects.emplace(key,tile);
+            }
         }
         p.symbols.BeginFrame();
         for(auto object:military)
@@ -476,12 +529,60 @@ void CGlobeScene::DrawObjects(int width,int height)
             if(!visible(object.GetInteger("layer")))continue;
             std::vector<Gdiplus::PointF> points;bool good=true;
             for(auto coordinate:object.GetArray("points")){Gdiplus::PointF point;if(!project(coordinate,point)){good=false;break;}points.push_back(point);}
-            if(good)p.symbols.Draw(graphics,object.GetString("code"),object.GetString("assembly"),points);
+            SceneSymbolAppearance appearance;
+            appearance.valid=object.GetBool("hasDrawMode");
+            appearance.rotation=float(object.GetDouble("rotation"));
+            appearance.bgWhite=object.GetBool("bgWhite",true);
+            appearance.colorMode=object.GetBool("colorMode",true);
+            appearance.fillFrame=object.GetBool("fillFrame",true);
+            appearance.showFrame=object.GetBool("showFrame",true);
+            appearance.showIcon=object.GetBool("showIcon",true);
+            appearance.civilian=object.GetBool("civilian");
+            appearance.luminance=object.GetInteger("luminance");
+            appearance.displayType=object.GetInteger("displayType");
+            appearance.state=object.GetInteger("symbolState");
+            if(good)p.symbols.Draw(graphics,object.GetString("code"),object.GetString("assembly"),points,
+                float(object.GetDouble("symbolSize",40)),object.GetInteger("transparency",255),appearance);
         }
         p.symbols.EndFrame();
     }
+    // Ground overlays are geographic meshes, not a screen-space screenshot.
+    glPushAttrib(GL_ENABLE_BIT|GL_TEXTURE_BIT|GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT|GL_CURRENT_BIT);
+    glEnable(GL_DEPTH_TEST); glDepthFunc(GL_LEQUAL); glDepthMask(GL_FALSE);
+    glDisable(GL_LIGHTING); glDisable(GL_CULL_FACE);
+    glEnable(GL_TEXTURE_2D); glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+    glTexEnvi(GL_TEXTURE_ENV,GL_TEXTURE_ENV_MODE,GL_REPLACE);
+    for(auto it=p.groundObjects.begin();it!=p.groundObjects.end();)
+    {
+        if(!usedObjects.count(it->first))
+        { glDeleteTextures(1,&it->second.texture); it=p.groundObjects.erase(it); continue; }
+        const auto& tile=it->second;
+        glBindTexture(GL_TEXTURE_2D,tile.texture);
+        const auto& b=tile.bounds;
+        const int steps=std::clamp(int(std::ceil(std::max(b.east-b.west,b.north-b.south)*4)),24,360);
+        const double arc=std::max(b.east-b.west,b.north-b.south)/steps*geo::Pi/180;
+        const double lift=5+2*geo::RadiusKm*1000*(1-std::cos(arc/2));
+        for(int row=0;row<steps;++row)
+        {
+            glBegin(GL_TRIANGLE_STRIP);
+            for(int col=0;col<=steps;++col) for(int edge=0;edge<2;++edge)
+            {
+                const double u=double(col)/steps,v=double(row+edge)/steps;
+                const double lon=b.west+(b.east-b.west)*u,lat=b.north-(b.north-b.south)*v;
+                auto vertex=geo::position(lon,lat,p.ground.Height(lon,lat)+lift);
+                glTexCoord2d(u,v); glVertex3d(vertex.x,vertex.y,vertex.z);
+            }
+            glEnd();
+        }
+        ++it;
+    }
+    glPopAttrib();
     std::vector<unsigned char> pixels;BitmapPixels(bitmap,pixels);
     glPushAttrib(GL_ENABLE_BIT|GL_TEXTURE_BIT|GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    // The globe enables back-face culling; the y-down billboard quad has
+    // the opposite winding. Keep that globe state out of this screen pass.
+    glDisable(GL_CULL_FACE);
     glDisable(GL_DEPTH_TEST);glDisable(GL_LIGHTING);glEnable(GL_TEXTURE_2D);glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);Upload(p.overlayTexture,width,height,pixels);
     glTexEnvi(GL_TEXTURE_ENV,GL_TEXTURE_ENV_MODE,GL_REPLACE);

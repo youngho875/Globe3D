@@ -277,6 +277,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="GlobeScene.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile><ClInclude Include="GlobeScene.h"/>
+    <ClInclude Include="SceneGround.h"/><ClCompile Include="SceneGround.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClCompile Include="SceneSymbols.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile><ClInclude Include="SceneSymbols.h"/>
     <ClCompile Include="VectorTileStyle.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile><ClInclude Include="VectorTileStyle.h"/>
     <ClCompile Include="AppPaths.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile><ClInclude Include="AppPaths.h"/>
