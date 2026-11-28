@@ -4,6 +4,9 @@
 #include "VectorTileStyle.h"
 #include "SceneSymbols.h"
 #include "SceneGround.h"
+#include "SceneModels.h"
+#include "AppPaths.h"
+#include <cpl_minixml.h>
 #include "../c4imap/OverlayRibbonRender.h"
 #ifndef GL_CLAMP_TO_EDGE
 #define GL_CLAMP_TO_EDGE 0x812F
@@ -232,9 +235,27 @@ public:
     GLuint overlayTexture=0;
     CSceneSymbols symbols;
     CSceneGround ground;
+    CSceneModels models;
+    std::string modelFile;
     std::map<std::string, GpuTile> groundObjects;
 
-    Impl():worker([this]{Work();}){}
+    Impl():worker([this]{Work();})
+    {
+        modelFile=AppPath("ModelSourcesXml");
+        models.Configure(modelFile);
+        using Xml=std::unique_ptr<CPLXMLNode,decltype(&CPLDestroyXMLNode)>;
+        Xml xml(CPLParseXMLFile(AppPath("BaseMapXml").c_str()),CPLDestroyXMLNode);
+        auto root=xml.get();while(root&&(root->eType!=CXT_Element||std::string(root->pszValue)!="BaseMap"))root=root->psNext;
+        if(root)
+        {
+            std::string source=CPLGetXMLValue(root,"AltitudeSource","auto");
+            int kind=0;std::string path=ResolveAppPath(CPLGetXMLValue(root,"Elevation.Path",AppPath("ElevationRoot").c_str()));
+            auto local=ResolveAppPath(CPLGetXMLValue(root,"TerrainLocal.LayerJson",""));
+            if(source=="terrain-server"){kind=2;path=CPLGetXMLValue(root,"TerrainServer.LayerJson","");}
+            else if(source=="terrain-local"||(source=="auto"&&!local.empty()&&std::filesystem::exists(std::filesystem::u8path(local)))){kind=1;path=local;}
+            ground.Configure(path,kind,AppPath(kind?"TerrainTilesDll":"TerrainElevationDll"));
+        }
+    }
     ~Impl()
     {
         {std::lock_guard<std::mutex> lock(mutex);stop=true;jobs.clear();}
@@ -384,6 +405,7 @@ void CGlobeScene::DrawMaps()
 }
 void CGlobeScene::ReleaseGL()
 {
+    impl_->models.ReleaseGL();
     for(auto& tile:impl_->gpu)glDeleteTextures(1,&tile.second.texture);
     for (auto& object : impl_->groundObjects) glDeleteTextures(1, &object.second.texture);
     impl_->groundObjects.clear();
@@ -593,3 +615,12 @@ void CGlobeScene::DrawObjects(int width,int height)
     glTexCoord2f(1,1);glVertex2i(width,height);glTexCoord2f(0,1);glVertex2i(0,height);
     glEnd();glPopMatrix();glMatrixMode(GL_PROJECTION);glPopMatrix();glMatrixMode(GL_MODELVIEW);glPopAttrib();
 }
+
+void CGlobeScene::DrawModels(int width,int height){impl_->models.Draw(width,height,impl_->ground);}
+void CGlobeScene::SetModelConfiguration(const std::string& file){impl_->modelFile=file;impl_->models.Configure(file,true);}
+void CGlobeScene::ReloadModels(){impl_->models.Configure(impl_->modelFile,true);}
+void CGlobeScene::SetModelsVisible(bool visible){impl_->models.SetVisible(visible);}
+bool CGlobeScene::ModelsVisible()const{return impl_->models.Visible();}
+std::string CGlobeScene::ModelStatus()const{return impl_->models.Status();}
+
+double CGlobeScene::ModelGroundHeight(double lon,double lat){return impl_->models.GroundHeight(lon,lat,impl_->ground);}

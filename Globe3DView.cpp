@@ -44,6 +44,7 @@ BEGIN_MESSAGE_MAP(CGlobe3DView, CView)
 	ON_COMMAND(ID_FILE_PRINT_PREVIEW, &CGlobe3DView::OnFilePrintPreview)
 	ON_WM_CONTEXTMENU()
 	ON_WM_RBUTTONUP()
+    ON_WM_RBUTTONDOWN()
 	ON_WM_CREATE()
     ON_WM_TIMER()
 	ON_WM_DESTROY()
@@ -131,10 +132,20 @@ void CGlobe3DView::OnEndPrinting(CDC* /*pDC*/, CPrintInfo* /*pInfo*/)
 	// TODO: 인쇄 후 정리 작업을 추가합니다.
 }
 
-void CGlobe3DView::OnRButtonUp(UINT /* nFlags */, CPoint point)
+void CGlobe3DView::OnRButtonDown(UINT flags, CPoint point)
 {
-	ClientToScreen(&point);
-	OnContextMenu(this, point);
+    BeginNavigation(MK_RBUTTON, flags, point);
+}
+
+void CGlobe3DView::OnRButtonUp(UINT, CPoint point)
+{
+    const bool menu = mouseButton_ == MK_RBUTTON && !mouseMoved_;
+    EndNavigation(MK_RBUTTON);
+    if (menu)
+    {
+        ClientToScreen(&point);
+        OnContextMenu(this, point);
+    }
 }
 
 void CGlobe3DView::OnContextMenu(CWnd*, CPoint point)
@@ -271,6 +282,7 @@ void CGlobe3DView::ReleaseGL()
 void CGlobe3DView::OnDestroy()
 {
     KillTimer(0x4731);
+    StopNavigation();
     ReleaseGL();
 
     CView::OnDestroy();
@@ -376,67 +388,12 @@ void CGlobe3DView::Render()
     const GLfloat light[] = { -0.3f,0.6f,1.0f,0.0f };
     glLightfv(GL_LIGHT0, GL_POSITION, light); // headlight in eye coordinates
 
-    geo::Vec3 eye, target, up;
-
-    // 카메라가 바라볼 지표면 위치
-    const double centerLon = lon_;
-    const double centerLat = lat_;
-    const double targetHeightM = local_ && !scene_.Active() ? 1000.0 * exaggeration_ : 0.0;
-
-    target = geo::position(centerLon, centerLat, targetHeightM);
-
-    // 지표면 기준 위쪽 방향
-    const geo::Vec3 radial = geo::unit(geo::position(centerLon, centerLat));
-
-    // 지표면 기준 동쪽 방향
-    const double longitudeRad = centerLon * geo::Pi / 180.0;
-
-    const geo::Vec3 east{ -std::sin(longitudeRad), std::cos(longitudeRad), 0.0 };
-
-    // 지표면 기준 북쪽 방향
-    const geo::Vec3 north = geo::unit(geo::cross(radial, east));
-
-    // 기존 지역 시점 + 가운데 버튼으로 조절한 시점
-    const double pitchDegrees = std::clamp((local_ ? tilt_ : 0.0) + perspectivePitch_, 0.0, 65.0);
-    const double headingDegrees = (local_ ? azimuth_ : 0.0) + perspectiveHeading_;
-    const double pitch = pitchDegrees * geo::Pi / 180.0;
-    const double heading = headingDegrees * geo::Pi / 180.0;
-
-    // 지표면에서 카메라가 놓일 수평 방향
-    const geo::Vec3 horizontal = north * std::cos(heading) + east * std::sin(heading);
-
-    // 기존 전지구 모드 distance_는 지구 중심까지의 거리이므로
-    // 지표면 중심의 회전 거리로 변환
-    const double cameraRangeKm = local_ ? distance_ : std::max(0.001, distance_ - geo::RadiusKm);
-
-    // target 주위로 카메라를 기울여 배치
-    eye = target + (radial * std::cos(pitch) - horizontal * std::sin(pitch)) * cameraRangeKm;
-
-    // 기울어진 카메라의 화면 위쪽 방향
-    up = radial * std::sin(pitch) + horizontal * std::cos(pitch);
-    gluLookAt(eye.x, eye.y, eye.z, target.x, target.y, target.z, up.x, up.y, up.z);
-    /*
-        if(local_)
-        {
-            target=geo::position(128,36,1000*exaggeration_);
-            auto radial=geo::unit(geo::position(128,36));
-            double l=128*geo::Pi/180;
-            geo::Vec3 east{-std::sin(l),std::cos(l),0};
-            auto north=geo::cross(radial,east);
-            double a=azimuth_*geo::Pi/180,t=tilt_*geo::Pi/180;
-            auto horizontal=north*std::cos(a)+east*std::sin(a);
-            eye=target+(radial*std::cos(t)+horizontal*std::sin(t))*distance_;
-            up=radial*std::sin(t)-horizontal*std::cos(t);
-        }
-        else
-        {
-            auto radial=geo::unit(geo::position(lon_,lat_));
-            eye=radial*distance_;
-            target={0,0,0};
-            up={0,0,1};
-        }
-        gluLookAt(eye.x,eye.y,eye.z,target.x,target.y,target.z,up.x,up.y,up.z);
-    */
+    navigationHeightM_ = scene_.ModelsVisible() ? scene_.ModelGroundHeight(lon_,lat_) :
+        (local_ && !scene_.Active() ? 1000.0 * exaggeration_ : 0.0);
+    const auto camera = navigation::MakeFrame(NavigationCamera());
+    gluLookAt(camera.eye.x, camera.eye.y, camera.eye.z,
+              camera.target.x, camera.target.y, camera.target.z,
+              camera.up.x, camera.up.y, camera.up.z);
     bool textured = texture_ && textureEnabled_;
     if (textured)
     {
@@ -463,130 +420,141 @@ void CGlobe3DView::Render()
     }
 
     scene_.DrawMaps();
+    scene_.DrawModels(width_,height_);
     scene_.DrawObjects(width_,height_);
     UpdateMouseCoordinates();
     DrawHud();
     SwapBuffers(dc_);
 }
 
-void CGlobe3DView::OnLButtonDown(UINT flags, CPoint point)
+navigation::Camera CGlobe3DView::NavigationCamera() const
 {
-    SetFocus();
-    SetCapture();
-    dragging_ = true;
-    last_ = point;
-
-    CView::OnLButtonDown(flags, point);
+    navigation::Camera camera;
+    camera.longitude = lon_;
+    camera.latitude = lat_;
+    camera.rangeKm = local_ ? distance_ : distance_ - geo::RadiusKm;
+    camera.heightM = navigationHeightM_;
+    camera.heading = (local_ ? azimuth_ : 0) + perspectiveHeading_;
+    camera.pitch = std::clamp((local_ ? tilt_ : 0) + perspectivePitch_, 0., 65.);
+    camera.width = width_;
+    camera.height = height_;
+    return camera;
 }
 
-void CGlobe3DView::OnLButtonUp(UINT flags, CPoint point)
+void CGlobe3DView::ApplyNavigation(const navigation::Camera& camera)
 {
-    dragging_ = false;
-    if (GetCapture() == this)
-        ReleaseCapture();
+    lon_ = camera.longitude;
+    lat_ = camera.latitude;
+    distance_ = local_ ? camera.rangeKm : geo::RadiusKm + camera.rangeKm;
+    perspectiveHeading_ = std::remainder(camera.heading - (local_ ? azimuth_ : 0), 360.);
+    perspectivePitch_ = camera.pitch - (local_ ? tilt_ : 0);
+    Invalidate(FALSE);
+}
 
-    CView::OnLButtonUp(flags, point);
+void CGlobe3DView::StopNavigation()
+{
+    wheelRemaining_ = 0;
+    KillTimer(0x4732);
+}
+
+void CGlobe3DView::BeginNavigation(UINT button, UINT flags, CPoint point)
+{
+    StopNavigation();
+    SetFocus();
+    SetCapture();
+    mouseButton_ = button;
+    mouseDown_ = last_ = point;
+    mouseMoved_ = false;
+    mouseAction_ = button == MK_MBUTTON || (flags & MK_CONTROL) ? MouseAction::Orbit :
+        button == MK_RBUTTON ? MouseAction::Zoom : MouseAction::Pan;
+}
+
+void CGlobe3DView::EndNavigation(UINT button)
+{
+    if(mouseButton_ != button) return;
+    mouseAction_ = MouseAction::None;
+    mouseButton_ = 0;
+    if(GetCapture() == this) ReleaseCapture();
+}
+
+void CGlobe3DView::OnLButtonDown(UINT flags, CPoint point)
+{
+    BeginNavigation(MK_LBUTTON, flags, point);
+}
+
+void CGlobe3DView::OnLButtonUp(UINT, CPoint)
+{
+    EndNavigation(MK_LBUTTON);
 }
 
 void CGlobe3DView::OnCaptureChanged(CWnd* wnd)
 {
-    dragging_ = false;
-    middleDragging_ = false;
-
+    mouseAction_ = MouseAction::None;
+    mouseButton_ = 0;
+    StopNavigation();
     CView::OnCaptureChanged(wnd);
 }
 
 void CGlobe3DView::OnMouseMove(UINT flags, CPoint point)
 {
     mouse_ = point;
-    if (middleDragging_ && (flags & MK_MBUTTON))
+    if(mouseAction_ != MouseAction::None && (flags & mouseButton_))
     {
-        const double dx = point.x - middleLast_.x;
-        const double dy = point.y - middleLast_.y;
-
-        // 좌우: 바라보는 방향
-        perspectiveHeading_ = std::remainder(
-            perspectiveHeading_ + dx * 0.3,
-            360.0);
-
-        // 상하: 지표면을 내려다보는 각도
-        // 기존 지역 모드의 tilt_를 기준으로 추가 회전
-        const double basePitch = local_ ? tilt_ : 0.0;
-
-        const double nextPitch = std::clamp(
-            basePitch + perspectivePitch_ + dy * 0.3,
-            0.0,
-            65.0);
-
-        perspectivePitch_ = nextPitch - basePitch;
-
-        middleLast_ = point;
-
-        // 두 버튼을 함께 눌렀다가 놓아도 왼쪽 드래그가 튀지 않도록
-        last_ = point;
-    }
-    else if (dragging_ && (flags & MK_LBUTTON))
-    {
-        // 기존 왼쪽 버튼 드래그 코드 유지
-        const double dx = (point.x - last_.x) * 0.3;
-        const double dy = (point.y - last_.y) * 0.3;
-
-        if (local_)
+        mouseMoved_ = mouseMoved_ || std::abs(point.x-mouseDown_.x)>3 || std::abs(point.y-mouseDown_.y)>3;
+        if(mouseMoved_)
         {
-            azimuth_ += dx;
-            tilt_ = std::clamp(tilt_ + dy, 0.0, 65.0);
+            auto camera = NavigationCamera();
+            const double dx = point.x-last_.x, dy = point.y-last_.y;
+            if(mouseAction_ == MouseAction::Pan)
+                navigation::Pan(camera,last_.x,last_.y,point.x,point.y);
+            else if(mouseAction_ == MouseAction::Orbit)
+            {
+                camera.heading = std::remainder(camera.heading+dx*.25,360.);
+                camera.pitch = std::clamp(camera.pitch+dy*.25,0.,65.);
+            }
+            else
+                navigation::Zoom(camera,std::exp(dy*4./std::max(1,height_)),mouseDown_.x,mouseDown_.y);
+            ApplyNavigation(camera);
+            last_ = point;
         }
-        else
-        {
-            lon_ = std::remainder(lon_ - dx, 360.0);
-            lat_ = std::clamp(lat_ + dy, -85.0, 85.0);
-        }
-
-        last_ = point;
     }
-
-    if (!mouseInside_)
+    if(!mouseInside_)
     {
-        TRACKMOUSEEVENT track{ sizeof(TRACKMOUSEEVENT),TME_LEAVE,m_hWnd,0 };
+        TRACKMOUSEEVENT track{sizeof(TRACKMOUSEEVENT),TME_LEAVE,m_hWnd,0};
         ::TrackMouseEvent(&track);
     }
-    mouseInside_ = (point.x >= 0 && point.y >= 0 && point.x < width_&& point.y < height_);
+    mouseInside_ = point.x>=0 && point.y>=0 && point.x<width_ && point.y<height_;
     Invalidate(FALSE);
-
-    if (dragging_)
-    {
-        double dx = (point.x - last_.x) * 0.3;
-        double dy = (point.y - last_.y) * 0.3;
-        if (local_)
-        {
-            azimuth_ += dx;
-            tilt_ = std::clamp(tilt_ + dy, 0.0, 65.0);
-        }
-        else
-        {
-            lon_ -= dx;
-            lat_ = std::clamp(lat_ + dy, -85.0, 85.0);
-        }
-        last_ = point;
-        Invalidate(FALSE);
-    }
-
-    CView::OnMouseMove(flags, point);
+    CView::OnMouseMove(flags,point);
 }
 
 BOOL CGlobe3DView::OnMouseWheel(UINT, short delta, CPoint point)
 {
-    double factor = std::pow(0.85, double(delta) / WHEEL_DELTA);
-    const double range=local_?distance_:distance_-geo::RadiusKm;
-    const double next=std::clamp(range*factor,0.001,200000.0);
-    distance_=local_?next:geo::RadiusKm+next;
-    Invalidate(FALSE);
-
+    ScreenToClient(&point);
+    wheelPoint_ = point;
+    wheelRemaining_ = std::clamp(wheelRemaining_ + std::log(.8)*double(delta)/WHEEL_DELTA,-3.,3.);
+    wheelTick_ = GetTickCount64();
+    SetTimer(0x4732,16,nullptr);
     return TRUE;
+}
+
+void CGlobe3DView::AnimateNavigation()
+{
+    const auto now = GetTickCount64();
+    const double dt = std::clamp(double(now-wheelTick_)/1000.,.001,.05);
+    wheelTick_ = now;
+    double step = wheelRemaining_ * (1-std::exp(-dt/0.075));
+    if(std::abs(wheelRemaining_)<.001) step = wheelRemaining_;
+    auto camera = NavigationCamera();
+    navigation::Zoom(camera,std::exp(step),wheelPoint_.x,wheelPoint_.y);
+    ApplyNavigation(camera);
+    wheelRemaining_ -= step;
+    if(std::abs(wheelRemaining_)<1e-8) StopNavigation();
 }
 
 void CGlobe3DView::OnKeyDown(UINT key, UINT repeat, UINT flags)
 {
+    StopNavigation();
     switch (key)
     {
     case '1':
@@ -741,6 +709,7 @@ void CGlobe3DView::DrawHud()
         glCallLists(static_cast<GLsizei>(text.size()), GL_UNSIGNED_BYTE, text.data());
     };
     print(22, coordinateText_);
+    print(92, scene_.ModelStatus());
     print(70, viewSync_.IsEnabled()?"C4IMap sync: ON":"C4IMap sync: OFF");
     print(46, "T: imagery folder  I: imagery  H: terrain  1/2: view  W: wire  G: grid  E: height");
     glPopMatrix();
@@ -953,27 +922,12 @@ void CGlobe3DView::LoadBaseMapXml(const std::filesystem::path& filename)
 }
 
 
-void CGlobe3DView::OnMButtonDown(UINT nFlags, CPoint point)
+void CGlobe3DView::OnMButtonDown(UINT flags, CPoint point)
 {
-    // TODO: 여기에 메시지 처리기 코드를 추가 및/또는 기본값을 호출합니다.
-    SetFocus();
-    SetCapture();
-
-    middleDragging_ = true;
-    middleLast_ = point;
-
-    CView::OnMButtonDown(nFlags, point);
+    BeginNavigation(MK_MBUTTON, flags, point);
 }
 
-
-void CGlobe3DView::OnMButtonUp(UINT nFlags, CPoint point)
+void CGlobe3DView::OnMButtonUp(UINT, CPoint)
 {
-    // TODO: 여기에 메시지 처리기 코드를 추가 및/또는 기본값을 호출합니다.
-    middleDragging_ = false;
-
-    // 왼쪽 드래그가 진행 중이면 캡처 유지
-    if (!dragging_ && GetCapture() == this)
-        ReleaseCapture();
-
-    CView::OnMButtonUp(nFlags, point);
+    EndNavigation(MK_MBUTTON);
 }

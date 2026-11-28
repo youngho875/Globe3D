@@ -16,6 +16,7 @@
 #include <afxwin.h>
 #include <gl/GL.h>
 #include "Geometry.h"
+#include "GlobeNavigation.h"
 #include "../MapViewSync/MapViewSync.h"
 #include "../MapViewSync/MapSceneSync.h"
 #include "GlobeScene.h"
@@ -75,8 +76,22 @@ private:
     bool wire_ = false;
     bool grid_ = false;
     CPoint last_;
-    bool middleDragging_ = false;
-    CPoint middleLast_;
+    enum class MouseAction { None, Pan, Orbit, Zoom };
+    MouseAction mouseAction_ = MouseAction::None;
+    UINT mouseButton_ = 0;
+    CPoint mouseDown_;
+    bool mouseMoved_ = false;
+    double navigationHeightM_ = 0;
+    double wheelRemaining_ = 0;
+    CPoint wheelPoint_;
+    ULONGLONG wheelTick_ = 0;
+    navigation::Camera NavigationCamera() const;
+    void ApplyNavigation(const navigation::Camera& camera);
+    void BeginNavigation(UINT button, UINT flags, CPoint point);
+    void EndNavigation(UINT button);
+    void StopNavigation();
+    void AnimateNavigation();
+    afx_msg void OnRButtonDown(UINT flags, CPoint point);
     double perspectivePitch_ = 0.0;
     double perspectiveHeading_ = 0.0;
 

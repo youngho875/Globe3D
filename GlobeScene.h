@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <memory>
 #include <string>
 
@@ -13,6 +13,13 @@ public:
     void RequestView(double longitude, double latitude, double metresPerPixel,
                      int width, int height);
     void DrawMaps();
+    void DrawModels(int width,int height);
+    void SetModelConfiguration(const std::string& filename);
+    void ReloadModels();
+    void SetModelsVisible(bool visible);
+    bool ModelsVisible()const;
+    std::string ModelStatus()const;
+    double ModelGroundHeight(double longitude,double latitude);
     void DrawObjects(int width, int height);
     void ReleaseGL();
 private:

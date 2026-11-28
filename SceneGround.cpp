@@ -1,5 +1,6 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "SceneGround.h"
+#include "SceneRuntimeModule.h"
 #include <thread>
 #include <mutex>
 #include <condition_variable>
@@ -48,6 +49,7 @@ public:
                 break;
             }
         }
+        CSceneRuntimeModule runtimeModule;
         HMODULE dll = nullptr;
         void* handle = nullptr;
         void (*destroy)(void*) = nullptr;
@@ -58,7 +60,7 @@ public:
         auto close = [&] {
             if (handle && destroy) destroy(handle);
             handle = nullptr;
-            if (dll) FreeLibrary(dll);
+            runtimeModule.Reset();
             dll = nullptr;
         };
         while (!stop)
@@ -77,7 +79,7 @@ public:
             if (opened != job.generation)
             {
                 close(); opened = job.generation;
-                dll = LoadLibraryW(std::filesystem::u8path(library).c_str());
+                dll = runtimeModule.Load(library);
                 if (dll)
                 {
                     const bool tiles = type != 0;

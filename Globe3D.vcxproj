@@ -292,4 +292,25 @@
     <ClCompile Include="Globe3DView_Sync.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
     <ClInclude Include="..\MapViewSync\MapViewSync.h" />
   </ItemGroup>
-<ItemGroup><ClCompile Include="ShapeLayer.cpp" /></ItemGroup><ItemGroup><ClCompile Include="..\c4imap\OverlayRibbonRender.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><ForcedIncludeFiles>$(ProjectDir)pch.h;%(ForcedIncludeFiles)</ForcedIncludeFiles></ClCompile></ItemGroup></Project>
+<ItemGroup><ClCompile Include="ShapeLayer.cpp" /></ItemGroup><ItemGroup><ClCompile Include="..\c4imap\OverlayRibbonRender.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader><ForcedIncludeFiles>$(ProjectDir)pch.h;%(ForcedIncludeFiles)</ForcedIncludeFiles></ClCompile></ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="SceneModels.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile><ClInclude Include="SceneModels.h"/>
+    <ClCompile Include="ModelGl.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile><ClInclude Include="ModelGl.h"/>
+    <ClCompile Include="ModelCatalog.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile><ClInclude Include="ModelCatalog.h"/>
+    <ClCompile Include="ModelPlacement.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile><ClInclude Include="ModelPlacement.h"/>
+    <ClInclude Include="SceneModelsState.h"/>
+  </ItemGroup>
+  <ItemDefinitionGroup>
+    <ClCompile><AdditionalIncludeDirectories>$(ProjectDir)..\LibSDK\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories></ClCompile>
+    <Link><AdditionalLibraryDirectories>$(ProjectDir)..\LibSDK\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories><AdditionalDependencies>ModelAssets.lib;%(AdditionalDependencies)</AdditionalDependencies></Link>
+  </ItemDefinitionGroup>
+  <Target Name="CopyModelAssetsRuntime" AfterTargets="Build"><Copy SourceFiles="$(ProjectDir)..\LibSDK\bin\ModelAssets.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" /></Target>
+  <ItemGroup>
+    <ClCompile Include="GlobeNavigation.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClInclude Include="GlobeNavigation.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="SceneRuntimeModule.cpp"><PrecompiledHeader>NotUsing</PrecompiledHeader></ClCompile>
+    <ClInclude Include="SceneRuntimeModule.h" />
+  </ItemGroup>
+</Project>

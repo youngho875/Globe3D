@@ -65,6 +65,7 @@ CAppPaths::CAppPaths(const std::string &name, const std::string &executable)
               {"TerrainElevationDll", "${ExeDir}/TerrainElevation.dll"},
               {"TerrainTilesDll", "${ExeDir}/TerrainTiles.dll"},
               {"BaseMapXml", "${ExeDir}/base-map.xml"},
+              {"ModelSourcesXml", "${ExeDir}/model-sources.xml"},
               {"LocalSourcesXml", "${ExeDir}/local-sources.xml"},
               {"TileSourcesXml", "${ExeDir}/tile-sources.xml"},
               {"OgcSourcesXml", "${ExeDir}/ogc-sources.xml"},
