@@ -91,6 +91,7 @@ private:
     void EndNavigation(UINT button);
     void StopNavigation();
     void AnimateNavigation();
+    void GoToFirstModel();
     afx_msg void OnRButtonDown(UINT flags, CPoint point);
     double perspectivePitch_ = 0.0;
     double perspectiveHeading_ = 0.0;

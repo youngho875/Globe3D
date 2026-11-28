@@ -557,6 +557,9 @@ void CGlobe3DView::OnKeyDown(UINT key, UINT repeat, UINT flags)
     StopNavigation();
     switch (key)
     {
+    case 'M':
+        GoToFirstModel();
+        return;
     case '1':
         local_ = false;
         distance_ = 20000;
@@ -698,8 +701,8 @@ void CGlobe3DView::DrawHud()
     glBegin(GL_QUADS);
     glVertex2i(0, 0);
     glVertex2i(width_, 0);
-    glVertex2i(width_, 58);
-    glVertex2i(0, 58);
+    glVertex2i(width_, 104);
+    glVertex2i(0, 104);
     glEnd();
     glColor3f(0.90f, 0.96f, 1.0f);
     auto print = [this](int y, const std::string& text)

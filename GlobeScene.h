@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <memory>
 #include <string>
 
@@ -19,6 +19,7 @@ public:
     void SetModelsVisible(bool visible);
     bool ModelsVisible()const;
     std::string ModelStatus()const;
+    bool FirstModelView(double& longitude,double& latitude,double& rangeMetres)const;
     double ModelGroundHeight(double longitude,double latitude);
     void DrawObjects(int width, int height);
     void ReleaseGL();

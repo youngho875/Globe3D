@@ -357,6 +357,8 @@ std::string CSceneModels::Status() const
     out << "3D models: " << p.visibleCount << " visible, " << p.gpu.size() << " cached, " << p.pending.size()
         << " loading, " << p.failed.size() << " failed; " << p.drawCalls << " draws"
         << (p.graphics.Instanced() ? " (instanced)" : " (compatible)");
+    if(p.visible && p.catalog && !p.visibleCount && p.error.empty())
+        out << " - outside view/range (M: go to model)";
     if (!p.error.empty())
         out << " - " << p.error.substr(0, 100);
     return out.str();
@@ -539,4 +541,32 @@ double CSceneModels::GroundHeight(double lon, double lat, CSceneGround &shared)
     auto &p = *impl_;
     return (p.catalog && !p.catalog->heightSource.empty() && p.ownGround) ? p.ownGround->Height(lon, lat)
                                                                           : shared.Height(lon, lat);
+}
+
+bool CSceneModels::FirstModelView(double& longitude, double& latitude, double& rangeMetres) const
+{
+    const auto& p=*impl_;
+    if(p.configuring || !p.catalog) return false;
+    if(!p.catalog->instances.empty())
+    {
+        const auto& model=p.catalog->instances.front();
+        longitude=model.longitude;
+        latitude=model.latitude;
+        rangeMetres=std::max(280.,model.radius*model.scale*8.);
+        if(!model.clamp)rangeMetres+=std::abs(model.height);
+        return true;
+    }
+    if(!p.catalog->roots.empty())
+    {
+        size_t index=p.catalog->roots.front();
+        while(!p.catalog->tiles[index].children.empty())index=p.catalog->tiles[index].children.front();
+        const auto& tile=p.catalog->tiles[index];
+        const double radius=modelview::Length(tile.center);
+        if(radius<=0)return false;
+        longitude=std::atan2(tile.center.y,tile.center.x)*180/3.141592653589793;
+        latitude=std::asin(std::max(-1.,std::min(1.,tile.center.z/radius)))*180/3.141592653589793;
+        rangeMetres=std::max(280.,tile.radius*5.);
+        return true;
+    }
+    return false;
 }

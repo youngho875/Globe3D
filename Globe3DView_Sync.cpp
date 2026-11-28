@@ -116,6 +116,7 @@ void CGlobe3DView::ShowSyncBaseMapMenu(CPoint point)
     menu.AppendMenu(MF_STRING|(scene_.ModelsVisible()?MF_CHECKED:0),61005,L"3차원 객체 표시");
     menu.AppendMenu(MF_STRING,61006,L"3차원 객체 XML 불러오기...");
     menu.AppendMenu(MF_STRING,61007,L"3차원 객체 다시 읽기");
+    menu.AppendMenu(MF_STRING,61008,L"첫 3차원 객체 위치로 이동 (M)");
     menu.AppendMenu(MF_SEPARATOR);
     menu.AppendMenu(MF_STRING|MF_GRAYED,61004,viewSync_.IsEnabled()?L"C4IMap 동기화 중":L"동기화 중단됨 (C4IMap에서 시작)");
     const UINT command=menu.TrackPopupMenu(TPM_RETURNCMD|TPM_RIGHTBUTTON,point.x,point.y,this);
@@ -126,10 +127,31 @@ void CGlobe3DView::ShowSyncBaseMapMenu(CPoint point)
         if(dialog.DoModal()==IDOK)scene_.SetModelConfiguration(std::filesystem::path(dialog.GetPathName().GetString()).u8string());
     }
     else if(command==61007)scene_.ReloadModels();
+    else if(command==61008)GoToFirstModel();
     if(command>=61001&&command<=61003)
     {
         const unsigned index=command-61001;
         SetSyncBaseVisible(index,(state.visibleLayers&(1u<<index))==0);
         Invalidate(FALSE);
     }
+}
+
+void CGlobe3DView::GoToFirstModel()
+{
+    double longitude,latitude,rangeMetres;
+    if(!scene_.FirstModelView(longitude,latitude,rangeMetres))
+    {
+        AfxMessageBox(L"모델 XML을 읽는 중이거나 배치된 객체가 없습니다. 3차원 객체 XML 설정을 확인해 주세요.");
+        return;
+    }
+    StopNavigation();
+    scene_.SetModelsVisible(true);
+    lon_=longitude;
+    lat_=latitude;
+    local_=false;
+    distance_=geo::RadiusKm+std::clamp(rangeMetres/1000.,.005,200000.);
+    perspectivePitch_=35;
+    perspectiveHeading_=0;
+    UpdateTitle();
+    Invalidate(FALSE);
 }

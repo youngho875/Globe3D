@@ -14,6 +14,7 @@ class CSceneModels
     void ReleaseGL();
     double GroundHeight(double longitude, double latitude, CSceneGround &shared);
     std::string Status() const;
+    bool FirstModelView(double& longitude, double& latitude, double& rangeMetres) const;
 
   private:
     class Impl;

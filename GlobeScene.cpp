@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "GlobeScene.h"
 #include "Geometry.h"
 #include "VectorTileStyle.h"
@@ -624,3 +624,8 @@ bool CGlobeScene::ModelsVisible()const{return impl_->models.Visible();}
 std::string CGlobeScene::ModelStatus()const{return impl_->models.Status();}
 
 double CGlobeScene::ModelGroundHeight(double lon,double lat){return impl_->models.GroundHeight(lon,lat,impl_->ground);}
+
+bool CGlobeScene::FirstModelView(double& longitude,double& latitude,double& rangeMetres)const
+{
+    return impl_->models.FirstModelView(longitude,latitude,rangeMetres);
+}
